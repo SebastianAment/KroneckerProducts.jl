@@ -1,7 +1,8 @@
 module KroneckerProducts
 using LinearAlgebra
 
-# TODO: Make own project?
+export kronecker
+
 # TODO: kronecker sum: ⊕(A, B) = LazySum(⊗(A, I(checksquare(B))), ⊗(I(checksquare(A)), B))
 # struct KroneckerSum{T, A<:Tuple{Vararg{AbstractMatOrFac}}} <: Factorization{T}
 #     factors::A
