@@ -52,8 +52,6 @@ using Random
     # right multiplication
     x = randn(size(K, 2))
     @test K * x ≈ kronABC * x
-    # @time K*x
-    # @time kronABC*x
 
     # left multiplication
     x = randn(size(K, 1))
@@ -79,6 +77,16 @@ using Random
     b = randn(size(Chol, 1))
     # b = K*x
     @test K * (Chol \ b) ≈ b
+
+    # using KroneckerProducts: mul!!
+    # kronABC = kron(C, C, C)
+    # K = ⊗(C, C, C)
+    # b = randn(size(K, 2))
+    # println(size(kronABC))
+    # println(size(K))
+    # println(size(b))
+    # x, y = copy(b), similar(b)
+    # @test kronABC * b ≈ mul!!(x, K, y)
 end
 
 @testset "indexing" begin
