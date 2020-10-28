@@ -1,13 +1,16 @@
 module TestKroneckerProducts
 using Test
-using KroneckerProducts: kronecker, ⊗, KroneckerProduct, issquare, allsquare, isposdef, issuccess,
-    issymmetric, ispower, order
+using KroneckerProducts: kronecker, ⊗, KroneckerProduct, issquare, allsquare,
+                            isposdef, issuccess, issymmetric, ispower, order
 using LinearAlgebra
 using Random
 
+# n, m, k = 3,
+A = randn(3, 3)
+B = randn(2, 4)
+C = randn(2, 2)
+
 @testset "basic properties" begin
-    A = randn(2, 2)
-    B = randn(3, 4)
 
     @test kronecker(A) isa Matrix
     K = kronecker(A, B)
@@ -77,23 +80,11 @@ using Random
     b = randn(size(Chol, 1))
     # b = K*x
     @test K * (Chol \ b) ≈ b
-
-    # using KroneckerProducts: mul!!
-    # kronABC = kron(C, C, C)
-    # K = ⊗(C, C, C)
-    # b = randn(size(K, 2))
-    # println(size(kronABC))
-    # println(size(K))
-    # println(size(b))
-    # x, y = copy(b), similar(b)
-    # @test kronABC * b ≈ mul!!(x, K, y)
 end
 
 @testset "indexing" begin
     # get index
-    A = randn(3, 3)
-    B = randn(2, 4)
-    C = randn(2, 2)
+
     K = kronecker(A, B)
     kronAB = Matrix(K)
     for i in 1:size(K, 1), j in 1:size(K, 2)
@@ -104,6 +95,24 @@ end
     for i in 1:size(K, 1), j in 1:size(K, 2)
         @test K[i,j] == kronABC[i,j]
     end
+end
+
+@testset "mul!" begin
+    n = 16
+    A = randn(n, n)
+    B = randn(n, n)
+    K = kronecker(A, B)
+    k = size(K, 1)
+    x = randn(k)
+    y = randn(k)
+    mul!(y, K, x)
+    MK = Matrix(K)
+    @test y ≈ MK*x
+
+    α, β = randn(2)
+    r = α * MK * x + β * y
+    mul!(y, K, x, α, β)
+    @test y ≈ r
 end
 
 end # TestKroneckerProducts

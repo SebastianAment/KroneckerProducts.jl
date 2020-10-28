@@ -170,8 +170,14 @@ function dot(x::AbstractVecOrMat, K::KroneckerProduct, y::AbstractVecOrMat)
     dot(x, K*y) # fallback for now
 end
 
-function *(x::AbstractVecOrMat, K::KroneckerProduct, y::AbstractVecOrMat)
+function *(x::AbstractMatrix, K::KroneckerProduct, y::AbstractVecOrMat)
     x*(K*y)
+end
+
+function LinearAlgebra.mul!(y::AbstractVector, K::KroneckerProduct, x::AbstractVector,
+                            α::Real = 1, β::Real = 0)
+    Kx = K*x # could make this more efficient
+    @. y = α * Kx + β * y
 end
 
 ############################### indexing #######################################
