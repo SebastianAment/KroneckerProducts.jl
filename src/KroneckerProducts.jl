@@ -1,20 +1,17 @@
 module KroneckerProducts
 using LinearAlgebra
-using LinearAlgebraExtensions
-
-export kronecker, ⊗
-
-const AbstractMatOrFac{T} = Union{AbstractMatrix{T}, Factorization{T}}
-
 using LinearAlgebra: checksquare
 import LinearAlgebra: det, tr, logdet, issymmetric, ishermitian, isposdef,
 adjoint, transpose, conj
-import LinearAlgebra: Factorization, factorize, issuccess, Matrix, size
+import LinearAlgebra: issuccess, Matrix, size
 import LinearAlgebra: cholesky, cholesky!, qr, qr!#, svd, eigen, bunchkaufman, lu,
 import LinearAlgebra: \, *, /, rdiv!, ldiv!
+using LazyInverses
 
-# depends on Inverse
-import LazyInverse: Inverse, inverse, pseudoinverse, PseudoInverse
+const AbstractMatOrFac{T} = Union{AbstractMatrix{T}, Factorization{T}}
+LinearAlgebra.factorize(F::Factorization) = F
+
+export kronecker, ⊗
 
 # abstract type AbstractKroneckerProduct{T} end
 # struct FactorizedKroneckerProduct{T} <: Factorization{T} end
@@ -110,13 +107,13 @@ function inv(K::KroneckerProduct)
 end
 
 # TODO: checking for square here disallows pseudo-inverse ...
-function inverse(K::KroneckerProduct)
+function LazyInverses.inverse(K::KroneckerProduct)
     checksquare(K)
     allsquare(K) ? ⊗(inverse, K) : throw(SingularException(1))
 end
-pseudoinverse(K::KroneckerProduct) = ⊗(pseudoinverse, K)
+LazyInverses.pseudoinverse(K::KroneckerProduct) = ⊗(pseudoinverse, K)
 
-# TODO: meta programming, or delete?
+# IDEA: meta programming?
 LinearAlgebra.factorize(K::KroneckerProduct) = ⊗(factorize, K)
 LinearAlgebra.adjoint(K::KroneckerProduct) = ⊗(adjoint, K)
 LinearAlgebra.transpose(K::KroneckerProduct) = ⊗(transpose, K)
@@ -156,13 +153,13 @@ function *(K::KroneckerProduct, x::AbstractVecOrMat)
     X = x
     for (i, A) in enumerate(reverse(K.factors))
         X = reshape(X, (size(A, 2), :))
-        X = (A * X)'
+        X = adjoint(A * X)
     end
     (x isa AbstractVector) ? vec(X) : reshape(X, (size(x, 2), :))'
 end
 
-*(x::Adjoint{<:Number, <:AbstractVector}, K::KroneckerProduct) = (K'*x')'
-*(x::AbstractMatrix, K::KroneckerProduct) = (K'*x')'
+*(x::Adjoint{<:Number, <:AbstractVector}, K::KroneckerProduct) = adjoint(K'*x')
+*(x::AbstractMatrix, K::KroneckerProduct) = adjoint(K'*x')
 \(K::KroneckerProduct, x::AbstractVecOrMat) = pseudoinverse(factorize(K)) * x
 /(x::AbstractVecOrMat, K::KroneckerProduct) = x * inverse(factorize(K)) # pseudoinverse(K, Val(:R)) * x
 
@@ -199,4 +196,4 @@ function Base.checkbounds(K::KroneckerProduct, i::Integer, j::Integer)
     (1 ≤ i ≤ size(K, 1) && 1 ≤ j ≤ size(K, 2)) || throw(BoundsError(K, [i,j]))
 end
 
-end
+end # module
