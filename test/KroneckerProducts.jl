@@ -1,8 +1,9 @@
 module TestKroneckerProducts
 using Test
-using KroneckerProducts: kronecker, ⊗, KroneckerProduct, issquare, allsquare,
-                            isposdef, issuccess, issymmetric, ispower, isequiv, order
 using LinearAlgebra
+using KroneckerProducts
+using KroneckerProducts: kronecker, ⊗, KroneckerProduct, issquare, allsquare, isequiv, ispower, order
+                            # isposdef, issuccess, issymmetric
 using Random
 
 # n, m, k = 3,
@@ -78,7 +79,7 @@ C = randn(2, 2)
     @test Matrix(adjoint(AA ⊗ CC)) ≈ adjoint(kron(AA, CC))
     @test Matrix(transpose(AA ⊗ CC)) ≈ transpose(kron(AA, CC))
     @test Matrix(conj(AA ⊗ CC)) ≈ conj(kron(AA, CC))
-    @test all(F -> F isa Factorization, factorize(AA ⊗ CC).factors)
+    @test factorize(AA ⊗ CC) isa FactorizedKroneckerProduct
     @test all(F -> F isa LinearAlgebra.QRCompactWY, qr(AA ⊗ CC).factors)
     @test all(F -> F isa Cholesky, cholesky(AA ⊗ CC).factors)
     @test all(F -> F isa CholeskyPivoted, cholesky(AA ⊗ CC, Val(true)).factors)

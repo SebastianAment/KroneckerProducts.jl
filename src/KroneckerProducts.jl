@@ -11,16 +11,14 @@ using LazyInverses
 const AbstractMatOrFac{T} = Union{AbstractMatrix{T}, Factorization{T}}
 LinearAlgebra.factorize(F::Factorization) = F
 
-export kronecker, ⊗
-
-# abstract type AbstractKroneckerProduct{T} end
-# struct FactorizedKroneckerProduct{T} <: Factorization{T} end
+export kronecker, ⊗, KroneckerProduct, FactorizedKroneckerProduct
 
 # has field for temporary storage needed for non-allocating multiplies and solves
 struct KroneckerProduct{T, A<:Tuple, V} <: Factorization{T}
     factors::A
     temporaries::V
 end
+const FactorizedKroneckerProduct{T} = KroneckerProduct{T, <:Tuple{Vararg{Factorization}}}
 
 Base.eltype(K::KroneckerProduct{T}) where {T} = T
 Base.IndexStyle(::Type{<:KroneckerProduct}) = IndexCartesian()
@@ -30,7 +28,7 @@ Base.IndexStyle(::Type{<:KroneckerProduct}) = IndexCartesian()
 # if external vectors have different element types, need to either
 # fall back to allocating multiplication, or throw error
 function initialize_temporaries(A::Tuple, T = promote_type(eltype.(A)...))
-    temporaries = [zeros()]
+    temporaries = [zeros(T, size(A[1]))]
 end
 function KroneckerProduct(A::Tuple{Vararg{Union{Number, AbstractMatOrFac}}})
     T = promote_type(eltype.(A)...)
@@ -141,7 +139,11 @@ function LinearAlgebra.cholesky(K::KroneckerProduct, ::Val{true}; tol = 1e-12, c
     kronecker(A->cholesky(A, Val(true), tol = tol, check = check), K)
 end
 
-collect(K::KroneckerProduct) = kron(Matrix.(K.factors)...)
+
+function collect(K::KroneckerProduct)
+    f(A) = A isa Factorization ? AbstractMatrix(A) : A
+    kron(f.(K.factors)...)
+end
 LinearAlgebra.Matrix(K::KroneckerProduct) = collect(K)
 
 # mixed product property
