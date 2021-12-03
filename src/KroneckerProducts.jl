@@ -16,31 +16,37 @@ export kronecker, ⊗
 # abstract type AbstractKroneckerProduct{T} end
 # struct FactorizedKroneckerProduct{T} <: Factorization{T} end
 
-# has field for temporary storage needed for vec-trick and solves
-struct KroneckerProduct{T, A<:Tuple{Vararg{AbstractMatOrFac}},
-                            V} <: Factorization{T}
+# has field for temporary storage needed for non-allocating multiplies and solves
+struct KroneckerProduct{T, A<:Tuple, V} <: Factorization{T}
     factors::A
-    temporary::V
+    temporaries::V
 end
 
 Base.eltype(K::KroneckerProduct{T}) where {T} = T
 Base.IndexStyle(::Type{<:KroneckerProduct}) = IndexCartesian()
 
-function KroneckerProduct(A::Tuple{Vararg{AbstractMatOrFac}})
+# TODO:
+# intializes temporaries for multiplication and solve,
+# if external vectors have different element types, need to either
+# fall back to allocating multiplication, or throw error
+function initialize_temporaries(A::Tuple, T = promote_type(eltype.(A)...))
+    temporaries = [zeros()]
+end
+function KroneckerProduct(A::Tuple{Vararg{Union{Number, AbstractMatOrFac}}})
     T = promote_type(eltype.(A)...)
     KroneckerProduct{T, typeof(A), Nothing}(A, nothing)
 end
 
-# TODO: initialize_temporary()
-kronecker(A::AbstractMatOrFac) = A
-kronecker(A::AbstractMatOrFac...) = KroneckerProduct(A)
+function kronecker end # smart constructor
+kronecker(A::Union{Number, AbstractMatOrFac}) = A
+kronecker(A::Union{Number, AbstractMatOrFac}...) = KroneckerProduct(A)
+kronecker(A::Tuple) = KroneckerProduct(A)
 kronecker(K::KroneckerProduct) = K
-kronecker(A::Tuple{Vararg{AbstractMatOrFac}}) = KroneckerProduct(A)
 
-# TODO: making sure we have a flat Kronecker hierarchy?
+# IDEA: this makes sure we have a flat Kronecker hierarchy? could have separate "flatten" function
 # only makes sense to break if we have a subset, which is a power
-kronecker(A::AbstractMatOrFac, K::KroneckerProduct) = kronecker(A, K.factors...)
-kronecker(K::KroneckerProduct, A::AbstractMatOrFac) = kronecker(A, K)
+kronecker(A::Union{Number, AbstractMatOrFac}, K::KroneckerProduct) = kronecker(A, K.factors...)
+kronecker(K::KroneckerProduct, A::Union{Number, AbstractMatOrFac}) = kronecker(A, K)
 kronecker(K::KroneckerProduct, L::KroneckerProduct) = kronecker(K.factors..., L.factors...)
 
 # create new product by applying function to each component matrix
@@ -73,35 +79,37 @@ isfactorized(K::KroneckerProduct) = all(isfactorized, K.factors)
 samesize(K::KroneckerProduct) = (all(==(size(K.factors[1])), K.factors), size(K.factors[1]))
 
 # checks if all component matrices are the same
-ispower(K::KroneckerProduct) = all(==(K.factors[1]), K.factors)
+ispower(K::KroneckerProduct) = isequiv(K) || all(==(K.factors[1]), K.factors)
+# same as ispower but only does pointer check (constant for each factor)
+isequiv(K::KroneckerProduct) = all(F -> F === K.factors[1], K.factors)
 order(M::AbstractMatrix) = 1
 order(K::KroneckerProduct) = length(K.factors)
 
-function logdet(K::KroneckerProduct)
+function LinearAlgebra.logdet(K::KroneckerProduct)
     n = checksquare(K)
-    f(A) = logdet(A) * (n ÷ size(A, 1))
-    allsquare(K) ? sum(f, K.factors) : real(eltype(K))(-Inf)
-    # power optimization integrated:
-    # g(A) = (pow * n^(pow-1)) * logdet(A)
-    # allsquare(K) ? (ispower(K) ? g(K.A) : sum(f, K.factors)) : real(eltype(K))(-Inf)
+    if !allsquare(K) # implies that there is a rank deficient factor
+        real(eltype(K))(-Inf)
+    elseif isequiv(K) # if all factors are equivalent (have same pointer), use more efficient formula
+        p = length(K.factors)
+        A = K.factors[1]
+        k = size(A, 1)
+        p * (n ÷ k) * logdet(A)
+    else
+        f(A) = logdet(A) * (n ÷ size(A, 1))
+        sum(f, K.factors)
+    end
 end
 
-# specialization for kronecker power
-function logdet(K::KroneckerProduct, ispow::Val{true})
-    n = checksquare(K)
-    pow = order(K)
-    (pow * n^(pow-1)) * logdet(K.A)
-end
-det(K::KroneckerProduct) = exp(logdet(K))
+LinearAlgebra.det(K::KroneckerProduct) = exp(logdet(K))
 
 # TODO: meta?
-function tr(K::KroneckerProduct)
+function LinearAlgebra.tr(K::KroneckerProduct)
     n = checksquare(K)
-    allsquare(K) ? prod(tr, K.factors) : sum(K[i,i] for i in 1:n)
+    allsquare(K) ? prod(tr, K.factors) : sum(K[i, i] for i in 1:n)
 end
 
 # TODO: delete this?
-function inv(K::KroneckerProduct)
+function Base.inv(K::KroneckerProduct)
     checksquare(K)
     allsquare(K) ? ⊗(inv, K) : throw(SingularException(1))
 end
@@ -120,14 +128,17 @@ LinearAlgebra.transpose(K::KroneckerProduct) = ⊗(transpose, K)
 LinearAlgebra.conj(K::KroneckerProduct) = ⊗(conj, K)
 
 # useful for least-squares problems
+function LinearAlgebra.qr(K::KroneckerProduct, ::NoPivot = NoPivot())
+    kronecker(A->qr(A, NoPivot()), K)
+end
 function LinearAlgebra.qr(K::KroneckerProduct, ::Val{true})
     kronecker(A->qr(A, Val(true)), K)
 end
+function LinearAlgebra.cholesky(K::KroneckerProduct, ::Val{false} = Val(false); check = true)
+    kronecker(A->cholesky(A, check = check), K)
+end
 function LinearAlgebra.cholesky(K::KroneckerProduct, ::Val{true}; tol = 1e-12, check = true)
     kronecker(A->cholesky(A, Val(true), tol = tol, check = check), K)
-end
-function LinearAlgebra.cholesky(K::KroneckerProduct, ::Val{false} = Val(false))
-    kronecker(A->cholesky(A), K)
 end
 
 collect(K::KroneckerProduct) = kron(Matrix.(K.factors)...)

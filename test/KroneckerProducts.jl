@@ -1,7 +1,7 @@
 module TestKroneckerProducts
 using Test
 using KroneckerProducts: kronecker, ⊗, KroneckerProduct, issquare, allsquare,
-                            isposdef, issuccess, issymmetric, ispower, order
+                            isposdef, issuccess, issymmetric, ispower, isequiv, order
 using LinearAlgebra
 using Random
 
@@ -47,11 +47,42 @@ C = randn(2, 2)
     @test size(K) == size(A) .* size(B) .* size(C)
     kronABC = kron(A, B, C)
 
-    @test !issquare(A ⊗ B)
     @test issquare(A ⊗ C)
+    @test !issquare(A ⊗ B)
     @test allsquare(A ⊗ C)
-    @test ispower(A ⊗ A ⊗ A)
+    @test !allsquare(A ⊗ B)
+    @test ispower(A ⊗ A ⊗ copy(A))
     @test !ispower(A ⊗ B ⊗ A)
+    @test isequiv(A ⊗ A ⊗ A)
+    @test !isequiv(A ⊗ A ⊗ copy(A))
+    @test !isequiv(A ⊗ B ⊗ A)
+
+    # logdet test
+    AA = A'A + I
+    CC = C'C + I
+
+    @test logdet(KroneckerProduct((AA,))) ≈ logdet(AA)
+    @test logdet(AA ⊗ CC) ≈ logdet(kron(AA, CC))
+    @test logdet(AA ⊗ AA) ≈ logdet(kron(AA, AA)) # testing isequiv branch in logdet
+
+    @test det(KroneckerProduct((AA,))) ≈ det(AA)
+    @test det(AA ⊗ CC) ≈ det(kron(AA, CC))
+    @test det(AA ⊗ AA) ≈ det(kron(AA, AA))
+
+    @test tr(KroneckerProduct((AA,))) ≈ tr(AA)
+    @test tr(AA ⊗ CC) ≈ tr(kron(AA, CC))
+    @test tr(AA ⊗ AA) ≈ tr(kron(AA, AA))
+
+    @test Matrix(inv(AA ⊗ CC)) ≈ inv(kron(AA, CC))
+
+    @test Matrix(adjoint(AA ⊗ CC)) ≈ adjoint(kron(AA, CC))
+    @test Matrix(transpose(AA ⊗ CC)) ≈ transpose(kron(AA, CC))
+    @test Matrix(conj(AA ⊗ CC)) ≈ conj(kron(AA, CC))
+    @test all(F -> F isa Factorization, factorize(AA ⊗ CC).factors)
+    @test all(F -> F isa LinearAlgebra.QRCompactWY, qr(AA ⊗ CC).factors)
+    @test all(F -> F isa Cholesky, cholesky(AA ⊗ CC).factors)
+    @test all(F -> F isa CholeskyPivoted, cholesky(AA ⊗ CC, Val(true)).factors)
+
     # right multiplication
     x = randn(size(K, 2))
     @test K * x ≈ kronABC * x
