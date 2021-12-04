@@ -20,7 +20,7 @@ C = randn(2, 2)
     @test order(K) == 2
 
     # test indexing
-    @test K[1,1] == A[1,1] * B[1,1]
+    @test K[1, 1] == A[1, 1] * B[1, 1]
 
     @test Matrix(K) ≈ kron(A, B)
 
