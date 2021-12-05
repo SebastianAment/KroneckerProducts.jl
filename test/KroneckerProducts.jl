@@ -116,8 +116,11 @@ for elty in element_types
                     mul!(y, K, x, α, β)
                     @test y ≈ r
 
-                    # lmul!(α, K)
-                    # rmul!(K, α)
+                    KC = copy(K)
+                    @test Matrix(KC) ≈ M
+                    @test Matrix(lmul!(α, KC)) ≈ α * M
+                    KC = copy(K)
+                    @test Matrix(rmul!(KC, α)) ≈ α * M
                 end
 
                 @testset "algebra" begin

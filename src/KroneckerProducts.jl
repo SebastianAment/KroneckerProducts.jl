@@ -2,7 +2,7 @@ module KroneckerProducts
 using LinearAlgebra
 using LinearAlgebra: checksquare
 import LinearAlgebra: \, *, /, rdiv!, ldiv!
-include("lu.jl") #
+include("lu.jl")
 using LazyInverses
 
 const AbstractMatOrFac{T} = Union{AbstractMatrix{T}, Factorization{T}}
@@ -46,6 +46,12 @@ kronecker(A::Union{Number, AbstractMatOrFac}) = A
 kronecker(A::Union{Number, AbstractMatOrFac}...) = KroneckerProduct(A)
 kronecker(A::Tuple) = KroneckerProduct(A)
 kronecker(K::KroneckerProduct) = K
+
+function Base.copy(K::KroneckerProduct)
+    factors = tuple(copy.(K.factors)...)
+    temporaries = isnothing(K.temporaries) ? nothing : tuple(copy.(K.temporaries)...)
+    typeof(K)(factors, temporaries)
+end
 
 # IDEA: this makes sure we have a flat Kronecker hierarchy? could have separate "flatten" function
 # only makes sense to break if we have a subset, which is a power
@@ -170,10 +176,12 @@ end
 
 function LinearAlgebra.lmul!(a::Number, K::KroneckerProduct)
     lmul!(a, K.factors[1])
+    return K
 end
 
 function LinearAlgebra.rmul!(K::KroneckerProduct, a::Number)
     rmul!(K.factors[end], a)
+    return K
 end
 
 ################################ vec trick #####################################
