@@ -49,7 +49,7 @@ Base.size(K::KroneckerProduct, dim::Integer) = prod(A->size(A, dim), K.factors)
 
 function collect(K::KroneckerProduct)
     f(A) = A isa Factorization ? AbstractMatrix(A) : A
-    kron(f.(K.factors)...)
+    order(K) == 1 ? f(K.factors[1]) : kron(f.(K.factors)...)
 end
 LinearAlgebra.Matrix(K::KroneckerProduct) = collect(K)
 
@@ -74,8 +74,18 @@ isequiv(K::KroneckerProduct) = all(F -> F === K.factors[1], K.factors)
 order(M::AbstractMatrix) = 1
 order(K::KroneckerProduct) = length(K.factors)
 
-LinearAlgebra.det(K::KroneckerProduct) = exp(logdet(K))
-LinearAlgebra.logdet(K::KroneckerProduct) = logabsdet(K)[1]
+function LinearAlgebra.det(K::KroneckerProduct)
+    logabsdet_K, sign_K = logabsdet(K)
+    exp(logabsdet_K) * sign_K
+end
+function LinearAlgebra.logdet(K::KroneckerProduct)
+    logabsdet_K, sign_K = logabsdet(K)
+    if sign_K ≈ 1
+        logabsdet_K
+    else
+        throw(DomaingError("determinant non-positive: sign = $sign_K"))
+    end
+end
 function LinearAlgebra.logabsdet(K::KroneckerProduct)
     n = checksquare(K)
     if !allsquare(K) # implies that there is a rank deficient factor
@@ -114,6 +124,7 @@ function LazyInverses.inverse(K::KroneckerProduct)
     checksquare(K)
     allsquare(K) ? ⊗(inverse, K) : throw(SingularException(1))
 end
+LinearAlgebra.pinv(K::KroneckerProduct) = ⊗(pinv, K)
 LazyInverses.pseudoinverse(K::KroneckerProduct) = ⊗(pseudoinverse, K)
 
 LinearAlgebra.factorize(K::KroneckerProduct) = ⊗(factorize, K)
@@ -138,7 +149,8 @@ end
 ############################ multiplication ####################################
 # mixed product property
 function *(K1::KroneckerProduct, K2::KroneckerProduct)
-    if all((A, B) -> size(A) == size(B), zip(K1.factors, K2.factors)) # if the components have the same sizes
+    size(K1, 2) == size(K2, 1) || throw(DimensionMismatch("size(K1, 2) = $(size(K1, 2)) ≠ $(size(K2, 1)) = size(K2, 1)"))
+    if all((AB) -> size(AB[1]) == size(AB[2]), zip(K1.factors, K2.factors)) # if the components have the same sizes
         kronecker(K1.factors .* K2.factors)
     else # fallback
         Matrix(K1) * Matrix(K2)
@@ -146,7 +158,7 @@ function *(K1::KroneckerProduct, K2::KroneckerProduct)
 end
 
 *(a::Number, K::KroneckerProduct) = ⊗(a * K.factors[1], K.factors[2:end]...)
-*(K::KroneckerProduct, a::Number) = ⊗(K.factors[1:end-1], K.factors[end] * a)
+*(K::KroneckerProduct, a::Number) = ⊗(K.factors[1:end-1]..., K.factors[end] * a)
 
 function LinearAlgebra.lmul!(a::Number, K::KroneckerProduct)
     lmul!(a, K.factors[1])
