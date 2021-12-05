@@ -1,11 +1,8 @@
 module KroneckerProducts
 using LinearAlgebra
 using LinearAlgebra: checksquare
-import LinearAlgebra: det, tr, logdet, issymmetric, ishermitian, isposdef,
-adjoint, transpose, conj
-import LinearAlgebra: issuccess, Matrix, size
-import LinearAlgebra: cholesky, cholesky!, qr, qr!#, svd, eigen, bunchkaufman, lu,
 import LinearAlgebra: \, *, /, rdiv!, ldiv!
+include("lu.jl") #
 using LazyInverses
 
 const AbstractMatOrFac{T} = Union{AbstractMatrix{T}, Factorization{T}}
@@ -57,19 +54,12 @@ end
 LinearAlgebra.Matrix(K::KroneckerProduct) = collect(K)
 
 issquare(A::AbstractMatOrFac) = size(A, 1) == size(A, 2)
-# IDEA: meta
+# IDEA: meta programming
 allsquare(K::KroneckerProduct) = all(issquare, K.factors)
-issymmetric(K::KroneckerProduct) = all(issymmetric, K.factors)
-isposdef(K::KroneckerProduct) = all(isposdef, K.factors)
+LinearAlgebra.issymmetric(K::KroneckerProduct) = all(issymmetric, K.factors)
+LinearAlgebra.isposdef(K::KroneckerProduct) = all(isposdef, K.factors)
 # KroneckerProduct with factorizations
-issuccess(K::KroneckerProduct) = all(issuccess, K.factors)
-
-# to have this as a trait, need to return type
-# factorizationtrait
-isfactorized(A::AbstractMatrix) = false
-isfactorized(A::Factorization) = true
-isfactorized(K::FactorizedKroneckerProduct) = true
-isfactorized(K::KroneckerProduct) = false
+LinearAlgebra.issuccess(K::KroneckerProduct) = all(issuccess, K.factors)
 
 # isfactorized(W::Woodbury) = all(isfactorized, (W.A, W.C))
 # checks if all component matrices of a KroneckerProduct have the same size
@@ -84,27 +74,34 @@ isequiv(K::KroneckerProduct) = all(F -> F === K.factors[1], K.factors)
 order(M::AbstractMatrix) = 1
 order(K::KroneckerProduct) = length(K.factors)
 
-function LinearAlgebra.logdet(K::KroneckerProduct)
+LinearAlgebra.det(K::KroneckerProduct) = exp(logdet(K))
+LinearAlgebra.logdet(K::KroneckerProduct) = logabsdet(K)[1]
+function LinearAlgebra.logabsdet(K::KroneckerProduct)
     n = checksquare(K)
     if !allsquare(K) # implies that there is a rank deficient factor
-        real(eltype(K))(-Inf)
+        real(eltype(K))(-Inf), zero(eltype(K))
     elseif isequiv(K) # if all factors are equivalent (have same pointer), use more efficient formula
-        p = length(K.factors)
         A = K.factors[1]
-        k = size(A, 1)
-        p * (n ÷ k) * logdet(A)
+        logabsdet_A, sign_A = logabsdet(A)
+        p = length(K.factors)
+        k = p * (n ÷ size(A, 1))
+        k * logabsdet_A, sign_A^k
     else
-        f(A) = logdet(A) * (n ÷ size(A, 1))
-        sum(f, K.factors)
+        logabsdet_K = zero(eltype(K))
+        sign_K = one(eltype(K))
+        for A in K.factors
+            logabsdet_A, sign_A = logabsdet(A)
+            k = n ÷ size(A, 1)
+            logabsdet_K += k * logabsdet_A
+            sign_K *= sign_A^k
+        end
+        return logabsdet_K, sign_K
     end
 end
 
-LinearAlgebra.det(K::KroneckerProduct) = exp(logdet(K))
-
-# TODO: meta?
 function LinearAlgebra.tr(K::KroneckerProduct)
     n = checksquare(K)
-    allsquare(K) ? prod(tr, K.factors) : sum(K[i, i] for i in 1:n)
+    allsquare(K) ? prod(tr, K.factors) : sum(K[i] for i in diagind(K))
 end
 
 # TODO: delete this?
@@ -113,14 +110,12 @@ function Base.inv(K::KroneckerProduct)
     allsquare(K) ? ⊗(inv, K) : throw(SingularException(1))
 end
 
-# TODO: checking for square here disallows pseudo-inverse ...
 function LazyInverses.inverse(K::KroneckerProduct)
     checksquare(K)
     allsquare(K) ? ⊗(inverse, K) : throw(SingularException(1))
 end
 LazyInverses.pseudoinverse(K::KroneckerProduct) = ⊗(pseudoinverse, K)
 
-# IDEA: meta programming?
 LinearAlgebra.factorize(K::KroneckerProduct) = ⊗(factorize, K)
 LinearAlgebra.adjoint(K::KroneckerProduct) = ⊗(adjoint, K)
 LinearAlgebra.transpose(K::KroneckerProduct) = ⊗(transpose, K)
@@ -172,13 +167,12 @@ function *(K::KroneckerProduct, X::AbstractMatrix)
     Y = zeros(T, size(K, 1), size(X, 2))
     mul!(Y, K, X)
 end
-
 *(x::Adjoint{<:Number, <:AbstractVector}, K::KroneckerProduct) = adjoint(K'*x')
 *(x::AbstractMatrix, K::KroneckerProduct) = adjoint(K'*x')
 \(K::KroneckerProduct, x::AbstractVecOrMat) = pseudoinverse(factorize(K)) * x
-/(x::AbstractVecOrMat, K::KroneckerProduct) = x * inverse(factorize(K)) # pseudoinverse(K, Val(:R)) * x
+/(x::AbstractVecOrMat, K::KroneckerProduct) = x * pseudoinverse(factorize(K))
 
-function dot(x::AbstractVecOrMat, K::KroneckerProduct, y::AbstractVecOrMat)
+function LinearAlgebra.dot(x::AbstractVecOrMat, K::KroneckerProduct, y::AbstractVecOrMat)
     dot(x, K*y) # fallback for now
 end
 
@@ -188,26 +182,33 @@ end
 
 function LinearAlgebra.mul!(y::AbstractVecOrMat, K::KroneckerProduct, x::AbstractVecOrMat,
                             α::Real = 1, β::Real = 0)
-    size(K, 2) ≠ size(x, 1) && throw(DimensionMismatch("$(size(K, 2)) ≠ $(size(x, 1))"))
+    _mul_check_args(y, K, x)
     X = x
-    temporaries = get_temporaries(K, y)
+    temporaries = get_temporaries(K, x, y)
     for (A, z) in Iterators.reverse(zip(K.factors, temporaries))
         X = reshape(X, size(A, 2), :)
-        Z = reshape(z, size(A, 1), :)
-        mul!(Z, A, X)
-        X = Z # pointer swap
-        X = X' # taking adjoint very expensive!
+        Z = reshape(z, :, size(A, 1))
+        mul!(Z, transpose(X), transpose(A)) # same as Z = transpose(A*X)
+        X = Z # pointer change
     end
-    Kx = (x isa AbstractVector) ? vec(X) : reshape(X, (size(x, 2), :))'
+    Kx = (x isa AbstractVector) ? vec(X) : transpose(reshape(X, (size(x, 2), :)))
     @. y = α * Kx + β * y # IDEA: could fold this into last iteration of loop
 end
 
+function _mul_check_args(y::AbstractVecOrMat, K::KroneckerProduct, x::AbstractVecOrMat)
+    size(K, 2) ≠ size(x, 1) && throw(DimensionMismatch("size(K, 2) = $(size(K, 2)) ≠ $(size(x, 1)) = size(x, 1)"))
+    size(K, 1) ≠ size(y, 1) && throw(DimensionMismatch("size(K, 1) = $(size(K, 1)) ≠ $(size(y, 1)) = size(y, 1)"))
+    size(x, 2) ≠ size(y, 2) && throw(DimensionMismatch("size(x, 2) = $(size(x, 2)) ≠ $(size(y, 2)) = size(y, 2)"))
+    return true
+end
+
 # returns temporaries necessary for efficient multiplication y = K*x with KroneckerProduct
-function get_temporaries(K::KroneckerProduct, y::AbstractVecOrMat)
+function get_temporaries(K::KroneckerProduct, x::AbstractVecOrMat, y::AbstractVecOrMat)
     temporaries = K.temporaries
-    T = eltype(temporaries[1])
+    correct_type = eltype(temporaries[1]) == eltype(y) # is a little more restrictive than necessary, i.e. real could be cast into complex
+    correct_length = length(y) == length(temporaries[1])
     # need to allocate temporaries if size is not compatible, or element type differs
-    if isnothing(temporaries) || !(length(y) == length(temporaries[1])) || T != eltype(y)
+    if isnothing(temporaries) || !correct_type || !correct_length
         temporaries = initialize_temporaries(K, y)
     end
     return temporaries
@@ -230,7 +231,7 @@ function initialize_temporaries(factors::Tuple, T = promote_type(eltype.(A)...),
             t1, t2 = t1, t2
         end
     else
-        for A in Iterators.reverse(factors)
+        for A in Iterators.reverse(factors) # IDEA: only need to allocate two sufficiently large arrays
             k = size(A, 1)
             m = n ÷ size(A, 2)
             push!(temporaries, zeros(T, k * m))
