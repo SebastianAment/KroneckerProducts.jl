@@ -11,8 +11,10 @@ LinearAlgebra.factorize(F::Factorization) = F
 export kronecker, ⊗, KroneckerProduct, FactorizedKroneckerProduct, kronecker_power
 
 # has field for temporary storage needed for non-allocating multiplies and solves
-# IDEA: make mutable and automatically store latest temporary in structure
-struct KroneckerProduct{T, A<:Tuple, V} <: Factorization{T}
+# currently made struct mutable and automatically store latest temporary in structure
+# IDEA: could allocate two potentially large arrays for MatMatMul,
+# and create temporary views for MatVecMul
+mutable struct KroneckerProduct{T, A<:Tuple, V} <: Factorization{T}
     factors::A
     temporaries::V
 end
@@ -23,7 +25,18 @@ Base.IndexStyle(::Type{<:KroneckerProduct}) = IndexCartesian()
 
 function KroneckerProduct(A::Tuple{Vararg{Union{Number, AbstractMatOrFac}}})
     T = promote_type(eltype.(A)...)
-    temporaries = initialize_temporaries(A, T)
+    temporaries = nothing
+    T_temp = Union{Nothing, NTuple{length(A), Vector}}
+    KroneckerProduct{T, typeof(A), T_temp}(A, temporaries)
+end
+
+# num_cols is number of columns to be pre-allocated for mul!, if only matrix-vector
+# multiplies are required, num_cols = 1 is sufficient
+# eltype_temp is the element type of the temporaries to be allocate
+function KroneckerProduct(A::Tuple{Vararg{Union{Number, AbstractMatOrFac}}},
+                          num_cols::Int, eltype_temp = promote_type(eltype.(A)...))
+    temporaries = initialize_temporaries(A, eltype_temp, num_cols)
+    T = promote_type(eltype.(A)...)
     KroneckerProduct{T, typeof(A), typeof(temporaries)}(A, temporaries)
 end
 
@@ -191,15 +204,15 @@ function LinearAlgebra.mul!(y::AbstractVecOrMat, K::KroneckerProduct, x::Abstrac
                             α::Real = 1, β::Real = 0)
     _mul_check_args(y, K, x)
     X = x
-    temporaries = get_temporaries(K, x, y)
-    for (A, z) in Iterators.reverse(zip(K.factors, temporaries))
+    temporaries = set_temporaries!(K, x, y)
+    for (A, z) in Iterators.reverse(zip(K.factors, temporaries)) # this loop takes up the majority of the runtime
         X = reshape(X, size(A, 2), :)
         Z = reshape(z, :, size(A, 1))
         mul!(Z, transpose(X), transpose(A)) # same as Z = transpose(A*X)
         X = Z # pointer change
     end
     Kx = (x isa AbstractVector) ? vec(X) : transpose(reshape(X, (size(x, 2), :)))
-    @. y = α * Kx + β * y # IDEA: could fold this into last iteration of loop
+    @. y = α * Kx + β * y
 end
 
 function _mul_check_args(y::AbstractVecOrMat, K::KroneckerProduct, x::AbstractVecOrMat)
@@ -210,21 +223,26 @@ function _mul_check_args(y::AbstractVecOrMat, K::KroneckerProduct, x::AbstractVe
 end
 
 # returns temporaries necessary for efficient multiplication y = K*x with KroneckerProduct
-function get_temporaries(K::KroneckerProduct, x::AbstractVecOrMat, y::AbstractVecOrMat)
+function set_temporaries!(K::KroneckerProduct, x::AbstractVecOrMat, y::AbstractVecOrMat)
     temporaries = K.temporaries
-    correct_type = eltype(temporaries[1]) == eltype(y) # is a little more restrictive than necessary, i.e. real could be cast into complex
-    correct_length = length(y) == length(temporaries[1])
+    allocated = !isnothing(temporaries)
+    if allocated
+        correct_type = eltype(temporaries[1]) == eltype(y) # is a little more restrictive than necessary, i.e. real could be cast into complex
+        correct_length = length(y) == length(temporaries[1])
+        allocated = correct_type && correct_length
+    end
     # need to allocate temporaries if size is not compatible, or element type differs
-    if isnothing(temporaries) || !correct_type || !correct_length
+    if !allocated
         temporaries = initialize_temporaries(K, y)
     end
-    return temporaries
+    return K.temporaries = temporaries
 end
 
-# intializes temporaries for multiplication and solve,
-# if external vectors have different element types, need to either
-# fall back to allocating multiplication, or throw error
-# y is assumed to be pre-allocated result for mul!(y, K, x)
+# allocates temporaries for multiplication and solve,
+# if external vectors have different element types or different sizes,
+# need to allocate new temporaries
+# does not allocate new temporaries if existing ones satisfy the type and size
+# requirement for the current multiplication
 function initialize_temporaries(K::KroneckerProduct, y::AbstractVecOrMat)
     initialize_temporaries(K.factors, eltype(y), size(y, 2))
 end
@@ -238,13 +256,14 @@ function initialize_temporaries(factors::Tuple, T = promote_type(eltype.(A)...),
     end
     # second, allocate two arrays of this size and create views into them alternatingly
     t1, t2 = zeros(T, max_n), zeros(T, max_n) # only need to allocate two sufficiently large arrays
-    temporaries = Vector{typeof(t1)}(undef, length(factors))
+    temporaries = []
     n = prod(A->size(A, 2), factors) * num_cols
     for (i, A) in enumerate(Iterators.reverse(factors))
         n = size(A, 1) * (n ÷ size(A, 2))
         t = @view t1[1:n]
-        temporaries[i] = t
-        t1, t2 = t1, t2
+        # @time temporaries[i] = t
+        push!(temporaries, t)
+        t1, t2 = t2, t1
     end
     return tuple(Iterators.reverse(temporaries)...)
 end

@@ -32,6 +32,8 @@ for elty in element_types
             @test isequiv(KP)
             @test order(KP) == pow
             @test order(A) == 1
+            KT = KroneckerProduct((A,), 3, elty)
+            @test eltype(KT.temporaries[1]) == elty
         end
         for (i, tuple) in enumerate(tuples)
             @testset "kronecker product $i" begin
