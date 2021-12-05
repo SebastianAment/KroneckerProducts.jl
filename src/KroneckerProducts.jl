@@ -8,9 +8,10 @@ using LazyInverses
 const AbstractMatOrFac{T} = Union{AbstractMatrix{T}, Factorization{T}}
 LinearAlgebra.factorize(F::Factorization) = F
 
-export kronecker, ⊗, KroneckerProduct, FactorizedKroneckerProduct
+export kronecker, ⊗, KroneckerProduct, FactorizedKroneckerProduct, kronecker_power
 
 # has field for temporary storage needed for non-allocating multiplies and solves
+# IDEA: make mutable and automatically store latest temporary in structure
 struct KroneckerProduct{T, A<:Tuple, V} <: Factorization{T}
     factors::A
     temporaries::V
@@ -133,17 +134,11 @@ LinearAlgebra.transpose(K::KroneckerProduct) = ⊗(transpose, K)
 LinearAlgebra.conj(K::KroneckerProduct) = ⊗(conj, K)
 
 # useful for least-squares problems
-function LinearAlgebra.qr(K::KroneckerProduct, ::NoPivot = NoPivot())
-    kronecker(A->qr(A, NoPivot()), K)
+function LinearAlgebra.qr(K::KroneckerProduct, piv = NoPivot())
+    kronecker(A->qr(A, piv), K)
 end
-function LinearAlgebra.qr(K::KroneckerProduct, ::Val{true})
-    kronecker(A->qr(A, Val(true)), K)
-end
-function LinearAlgebra.cholesky(K::KroneckerProduct, ::Val{false} = Val(false); check = true)
-    kronecker(A->cholesky(A, check = check), K)
-end
-function LinearAlgebra.cholesky(K::KroneckerProduct, ::Val{true}; tol = 1e-12, check = true)
-    kronecker(A->cholesky(A, Val(true), tol = tol, check = check), K)
+function LinearAlgebra.cholesky(K::KroneckerProduct, piv = Val(false); check = true)
+    kronecker(A->cholesky(A, piv, check = check), K)
 end
 
 ############################ multiplication ####################################
@@ -234,21 +229,22 @@ function initialize_temporaries(K::KroneckerProduct, y::AbstractVecOrMat)
     initialize_temporaries(K.factors, eltype(y), size(y, 2))
 end
 function initialize_temporaries(factors::Tuple, T = promote_type(eltype.(A)...), num_cols::Int = 1)
+    # first, calculate maximum length of temporary array
     n = prod(A->size(A, 2), factors) * num_cols
-    temporaries = []
-    if samesize(factors) # if all A have the same size only need two temporaries that we alternate
-        t1, t2 = zeros(T, n), zeros(T, n)
-        for _ in factors
-            push!(temporaries, t1)
-            t1, t2 = t1, t2
-        end
-    else
-        for A in Iterators.reverse(factors) # IDEA: only need to allocate two sufficiently large arrays
-            k = size(A, 1)
-            m = n ÷ size(A, 2)
-            push!(temporaries, zeros(T, k * m))
-            n = k * m
-        end
+    max_n = n
+    for A in Iterators.reverse(factors)
+        n = size(A, 1) * (n ÷ size(A, 2))
+        max_n = max(n, max_n)
+    end
+    # second, allocate two arrays of this size and create views into them alternatingly
+    t1, t2 = zeros(T, max_n), zeros(T, max_n) # only need to allocate two sufficiently large arrays
+    temporaries = Vector{typeof(t1)}(undef, length(factors))
+    n = prod(A->size(A, 2), factors) * num_cols
+    for (i, A) in enumerate(Iterators.reverse(factors))
+        n = size(A, 1) * (n ÷ size(A, 2))
+        t = @view t1[1:n]
+        temporaries[i] = t
+        t1, t2 = t1, t2
     end
     return tuple(Iterators.reverse(temporaries)...)
 end

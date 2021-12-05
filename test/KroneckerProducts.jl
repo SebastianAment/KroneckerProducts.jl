@@ -26,6 +26,12 @@ for elty in element_types
             a = randn(elty)
             @test kronecker(a) == a
             @test Matrix(KroneckerProduct((A,))) ≈ A
+            pow = 3
+            KP = kronecker_power(A, pow)
+            @test ispower(KP)
+            @test isequiv(KP)
+            @test order(KP) == pow
+            @test order(A) == 1
         end
         for (i, tuple) in enumerate(tuples)
             @testset "kronecker product $i" begin
@@ -38,6 +44,7 @@ for elty in element_types
                     @test order(K) == length(tuple)
                     @test IndexStyle(typeof(K)) == IndexCartesian()
                     @test Matrix(K) ≈ M
+                    @test kronecker(K) === K
 
                     @test issquare(K) == (size(K, 1) == size(K, 2))
                     @test samesize(K) == all(==(size(tuple[1])), tuple)
@@ -45,6 +52,7 @@ for elty in element_types
                     @test ispower(K) == all(==(tuple[1]), tuple)
                     @test isequiv(K) == all(A->A===tuple[1], tuple)
                     @test isposdef_K == isposdef(M)
+                    @test issymmetric(K) == issymmetric(M)
 
                     # testing adjoint, transpose, conj
                     @test Matrix(adjoint(K)) ≈ adjoint(M)
@@ -68,12 +76,16 @@ for elty in element_types
                     # factorizing generic kronecker product
                     @test factorize(K) isa FactorizedKroneckerProduct
                     qr_K = qr(K)
-                    # display(typeof(qr_K.factors[1]))
+                    @test all(F -> F isa LinearAlgebra.QRCompactWY, qr_K.factors)
+
+                    pivoted_qr_K = qr(K, ColumnNorm())
                     @test all(F -> F isa LinearAlgebra.QRCompactWY, qr_K.factors)
                     if isposdef_K
                         cholesky_K = cholesky(K)
+                        @test issuccess(cholesky_K)
                         @test all(F -> F isa Cholesky, cholesky_K.factors)
                         pivoted_cholesky_K = cholesky(K, Val(true))
+                        @test issuccess(pivoted_cholesky_K)
                         @test all(F -> F isa CholeskyPivoted, pivoted_cholesky_K.factors)
                     end
                     if issquare(K)
