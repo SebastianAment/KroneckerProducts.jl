@@ -34,6 +34,18 @@ for elty in element_types
             @test order(A) == 1
             KT = KroneckerProduct((A,), 3, elty)
             @test eltype(KT.temporaries[1]) == elty
+
+            KT2 = kronecker(KT, KT)
+            @test KT2 isa KroneckerProduct
+            @test length(KT2.factors) == 2length(KT.factors) # testing hierarchy got flattened
+
+            KTB = kronecker(KT, B)
+            @test length(KTB.factors) == length(KT.factors) + 1
+            @test KTB.factors[end] === B
+
+            BKT = kronecker(B, KT)
+            @test length(BKT.factors) == length(KT.factors) + 1
+            @test BKT.factors[1] === B
         end
         for (i, tuple) in enumerate(tuples)
             @testset "kronecker product $i" begin
@@ -76,7 +88,8 @@ for elty in element_types
 
                 @testset "factorization" begin
                     # factorizing generic kronecker product
-                    @test factorize(K) isa FactorizedKroneckerProduct
+                    F = factorize(K)
+                    @test F isa FactorizedKroneckerProduct
                     qr_K = qr(K)
                     @test all(F -> F isa LinearAlgebra.QRCompactWY, qr_K.factors)
 
@@ -94,6 +107,12 @@ for elty in element_types
                         inv_M = inv(M)
                         @test Matrix(inv(K)) ≈ inv_M
                         @test Matrix(inverse(K)) ≈ inv_M
+
+                        x = randn(elty, size(F, 2))
+                        y = zero(x)
+                        z = M \ x
+                        @test ldiv!(y, F, x) ≈ z
+                        @test ldiv!(F, x) ≈ z
                     end
                     pinv_M = pinv(M)
                     @test Matrix(pinv(K)) ≈ pinv_M
@@ -116,11 +135,17 @@ for elty in element_types
                     mul!(y, K, x, α, β)
                     @test y ≈ r
 
+                    # scalar lmul!
                     KC = copy(K)
                     @test Matrix(KC) ≈ M
                     @test Matrix(lmul!(α, KC)) ≈ α * M
                     KC = copy(K)
                     @test Matrix(rmul!(KC, α)) ≈ α * M
+
+                    # ldiv! - need K to be factorized
+                    # F = factorize(K)
+                    # @test ldiv!(y, F, x) ≈ M \ x
+                    # @test ldiv!(F, x) ≈ M \ x
                 end
 
                 @testset "algebra" begin

@@ -56,7 +56,7 @@ end
 # IDEA: this makes sure we have a flat Kronecker hierarchy? could have separate "flatten" function
 # only makes sense to break if we have a subset, which is a power
 kronecker(A::Union{Number, AbstractMatOrFac}, K::KroneckerProduct) = kronecker(A, K.factors...)
-kronecker(K::KroneckerProduct, A::Union{Number, AbstractMatOrFac}) = kronecker(A, K)
+kronecker(K::KroneckerProduct, A::Union{Number, AbstractMatOrFac}) = kronecker(K.factors..., A)
 kronecker(K::KroneckerProduct, L::KroneckerProduct) = kronecker(K.factors..., L.factors...)
 
 # create new product by applying function to each component matrix
@@ -221,6 +221,15 @@ function LinearAlgebra.mul!(y::AbstractVecOrMat, K::KroneckerProduct, x::Abstrac
     end
     Kx = (x isa AbstractVector) ? vec(X) : transpose(reshape(X, (size(x, 2), :)))
     @. y = α * Kx + β * y
+end
+
+function LinearAlgebra.ldiv!(y::AbstractVecOrMat, K::KroneckerProduct, x::AbstractVecOrMat)
+    mul!(y, pseudoinverse(K), x)
+end
+
+# we can do this because temporaries are used to carry out the intermediate multiplications
+function LinearAlgebra.ldiv!(K::KroneckerProduct, x::AbstractVecOrMat)
+    mul!(x, pseudoinverse(K), x)
 end
 
 function _mul_check_args(y::AbstractVecOrMat, K::KroneckerProduct, x::AbstractVecOrMat)
