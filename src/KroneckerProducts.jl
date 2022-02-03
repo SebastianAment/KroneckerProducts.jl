@@ -200,6 +200,13 @@ end
 \(K::KroneckerProduct, x::AbstractVecOrMat) = pseudoinverse(factorize(K)) * x
 /(x::AbstractVecOrMat, K::KroneckerProduct) = x * pseudoinverse(factorize(K))
 
+# multiplying with lazy inverse
+*(A::AbstractInverse, B::KroneckerProduct) = Matrix(A) * B
+*(A::KroneckerProduct, B::AbstractInverse) = A * Matrix(B)
+# dividing by lazy inverse
+\(A::AbstractInverse, B::KroneckerProduct) = A.parent * B
+/(A::KroneckerProduct, B::AbstractInverse) = A * B.parent
+
 function LinearAlgebra.dot(x::AbstractVecOrMat, K::KroneckerProduct, y::AbstractVecOrMat)
     dot(x, K*y) # fallback for now
 end

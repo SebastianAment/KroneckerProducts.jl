@@ -185,6 +185,13 @@ for elty in element_types
                     a = randn(elty)
                     @test Matrix(a*K) ≈ a*M
                     @test Matrix(K*a) ≈ M*a
+
+                    # interaction with lazy inverse
+                    Inv = pinverse(randn(elty, size(K)))
+                    @test Inv * K ≈ Matrix(Inv) * M
+                    @test K * Inv ≈ M * Matrix(Inv)
+                    @test Inv' \ K ≈ Matrix(Inv)' \ M
+                    @test K / Inv' ≈ M / Matrix(Inv)'
                 end
             end # testset
         end # loop over kronecker_products
